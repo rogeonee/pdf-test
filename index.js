@@ -51,7 +51,7 @@ const splitTextIntoChunks = (text, limit) => {
   return chunks;
 };
 
-// Function to process and add post content to PDF
+// Function to process and add post content to PDF (unused for now)
 const processPostBody = (doc, body, hasImages) => {
   if (!body) return;
 
@@ -196,6 +196,44 @@ const renderTextElements = (doc, post, textChunks) => {
   doc.moveDown(); // Gap after date uses font size 13 line height
 };
 
+const renderCroppedImage = (doc, imagePath, x, y, targetWidth, targetHeight) => {
+  if (!fs.existsSync(imagePath)) {
+    console.error(`Image not found: ${imagePath}`);
+    return;
+  }
+
+  try {
+    // Get original dimensions
+    const { width: origWidth, height: origHeight } = sizeOf(imagePath);
+    
+    // Calculate scale ratios
+    const widthRatio = targetWidth / origWidth;
+    const heightRatio = targetHeight / origHeight;
+    
+    // Use the larger ratio to ensure the image covers the target area
+    const ratio = Math.max(widthRatio, heightRatio);
+    
+    // Calculate scaled dimensions
+    const scaledWidth = origWidth * ratio;
+    const scaledHeight = origHeight * ratio;
+    
+    // Calculate positioning to center the image
+    const offsetX = (targetWidth - scaledWidth) / 2;
+    const offsetY = (targetHeight - scaledHeight) / 2;
+    
+    // Draw the image with clipping
+    doc.save();
+    doc.rect(x, y, targetWidth, targetHeight).clip();
+    doc.image(imagePath, x + offsetX, y + offsetY, { 
+      width: scaledWidth, 
+      height: scaledHeight 
+    });
+    doc.restore();
+  } catch (error) {
+    console.error(`Error processing image ${imagePath}:`, error);
+  }
+};
+
 const renderTextOnlyPost = (doc, post) => {
   const charLimit = LAYOUT.CHAR_LIMIT_NO_IMAGES; // e.g., 2500
   const { textHeight, textChunks } = calculateTextHeights(doc, post, charLimit);
@@ -258,6 +296,113 @@ const renderSingleImagePost = (doc, post) => {
     doc.image(imagePath, x, doc.y, { width: imageScaledWidth, height: imageScaledHeight });
   }
 };
+
+const renderTwoImagePost = (doc, post) => {
+  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
+  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+  
+  // Image paths
+  const imagePaths = post.pictures.slice(0, 2);
+  
+  // Gap between images
+  const imageGap = 8;
+  
+  // Max width for images
+  const maxImageWidth = 531;
+  
+  // First, render the text to calculate remaining space
+  // Using your optimized value for better space distribution
+  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 700) / 2, LAYOUT.MARGINS);
+  doc.y = startY;
+  
+  renderTextElements(doc, post, textChunks);
+  
+  // Calculate remaining space for images
+  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
+  
+  if (remainingSpace <= 0) {
+    console.log("No space left for images");
+    return;
+  }
+  
+  // Two equal-sized images stacked vertically
+  // Divide the remaining space equally between them (minus the gap)
+  const imageHeight = (remainingSpace - imageGap) / 2;
+  const imageWidth = maxImageWidth;
+  
+  // Render first image centered
+  const imageX = (doc.page.width - imageWidth) / 2;
+  if (imagePaths[0]) {
+    renderCroppedImage(doc, imagePaths[0], imageX, doc.y, imageWidth, imageHeight);
+  }
+  
+  // Move down for second image
+  doc.y += imageHeight + imageGap;
+  
+  // Render second image centered
+  if (imagePaths[1]) {
+    renderCroppedImage(doc, imagePaths[1], imageX, doc.y, imageWidth, imageHeight);
+  }
+};
+
+const renderThreeImagePost = (doc, post) => {
+  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
+  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+  
+  // Image paths
+  const imagePaths = post.pictures.slice(0, 3);
+  
+  // Gap between images
+  const imageGap = 8;
+  
+  // Max width for images
+  const maxImageWidth = 531;
+  
+  // First, render the text to calculate remaining space
+  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 700) / 2, LAYOUT.MARGINS);
+  doc.y = startY;
+  
+  renderTextElements(doc, post, textChunks);
+  
+  // Calculate remaining space for images
+  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
+  
+  if (remainingSpace <= 0) {
+    console.log("No space left for images");
+    return;
+  }
+  
+  // Layout: 1 large image on top, 2 equal-sized images below
+  // Allocate 60% of space to top image, 40% to bottom row (minus the gap)
+  const topImageHeight = (remainingSpace - imageGap) * 0.6;
+  const bottomImageHeight = (remainingSpace - imageGap) * 0.4;
+  
+  // Top image takes full width
+  const topImageWidth = maxImageWidth;
+  // Bottom images each take (fullWidth - gap) / 2
+  const bottomImageWidth = (maxImageWidth - imageGap) / 2;
+  
+  // Render top image centered
+  const topImageX = (doc.page.width - topImageWidth) / 2;
+  if (imagePaths[0]) {
+    renderCroppedImage(doc, imagePaths[0], topImageX, doc.y, topImageWidth, topImageHeight);
+  }
+  
+  // Move down for bottom row
+  doc.y += topImageHeight + imageGap;
+  
+  // Render bottom left image
+  const bottomLeftX = (doc.page.width - maxImageWidth) / 2;
+  if (imagePaths[1]) {
+    renderCroppedImage(doc, imagePaths[1], bottomLeftX, doc.y, bottomImageWidth, bottomImageHeight);
+  }
+  
+  // Render bottom right image
+  const bottomRightX = bottomLeftX + bottomImageWidth + imageGap;
+  if (imagePaths[2]) {
+    renderCroppedImage(doc, imagePaths[2], bottomRightX, doc.y, bottomImageWidth, bottomImageHeight);
+  }
+};
  
 // Main function to generate PDF
 const createStoryPDF = () => {
@@ -274,12 +419,19 @@ const createStoryPDF = () => {
 
     const hasImages = post.pictures.length > 0;
 
-    if (hasImages && post.pictures.length > 0) {
+    if (hasImages) {
+      if (post.pictures.length === 1) {
         renderSingleImagePost(doc, post);
-    } else if (hasImages && post.pictures.length > 1) {
-    // Some other function for multiple images
+      } else if (post.pictures.length === 2) {
+        renderTwoImagePost(doc, post);
+      } else if (post.pictures.length === 3) {
+        renderThreeImagePost(doc, post);
+      } else if (post.pictures.length >= 4) {
+        // renderFourImagePost(doc, post);
+        console.log(`Post with ${post.pictures.length} images not fully supported yet`);
+      }
     } else {
-        renderTextOnlyPost(doc, post);
+      renderTextOnlyPost(doc, post);
     }
   });
 
