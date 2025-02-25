@@ -1,5 +1,5 @@
-// const textPosts = require('./sample-posts');
-oneImagePosts = require('./sample-posts');
+//const textPosts = require('./sample-posts');
+ const oneImagePosts = require('./sample-posts');
 
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
@@ -120,14 +120,8 @@ const formatDate = (date) => {
   });
 };
 
-const renderTextOnlyPost = (doc, post) => {
-  // Split body into chunks first
-  const formattedText = convertHtmlToFormattedText(post.body);
-  const charLimit = LAYOUT.CHAR_LIMIT_NO_IMAGES; // For text-only
-  const textChunks = splitTextIntoChunks(formattedText, charLimit);
-
-  // --- Calculate heights (Title, Body, Date) ---
-  // Title
+const calculateTextHeights = (doc, post, charLimit) => {
+  // Title height
   doc.font('Helvetica-Bold').fontSize(24);
   const titleHeight = doc.heightOfString(post.title, {
     width: doc.page.width - (LAYOUT.MARGINS * 2),
@@ -135,180 +129,135 @@ const renderTextOnlyPost = (doc, post) => {
 
   // Switch to body font
   doc.font('Helvetica').fontSize(13);
+  const spacingAfterTitle = doc.currentLineHeight(); // Gap after title
 
   // Body chunks
-  let bodyHeight = 0;
-  let spacingBetweenChunks = 0;
-  textChunks.forEach((chunk, chunkIndex) => {
-    const chunkHeight = doc.heightOfString(chunk, {
-      width: doc.page.width - (LAYOUT.MARGINS * 2),
-    });
-    bodyHeight += chunkHeight;
-    if (chunkIndex < textChunks.length - 1) {
-      spacingBetweenChunks += doc.currentLineHeight();
-    }
-  });
-
-  // Date
-  const dateString = formatDate(post.createdAt); // e.g. "January 24, 2025"
-  const dateHeight = doc.heightOfString(dateString, {
-    width: doc.page.width - (LAYOUT.MARGINS * 2),
-  });
-
-  // Spacing after title
-  const spacingAfterTitle = doc.currentLineHeight();
-
-  // Total height calculation
-  const totalContentHeight =
-    titleHeight + spacingAfterTitle + (bodyHeight + spacingBetweenChunks) + dateHeight;
-
-  // Center content vertically, but don't go above top margin
-  const startY = Math.max((doc.page.height - totalContentHeight) / 2, LAYOUT.MARGINS);
-  doc.y = startY;
-
-  // --- Render ---
-  // Title
-  doc.font('Helvetica-Bold').fontSize(24).text(post.title, { align: 'left' });
-  doc.moveDown(); // spacing after title
-
-  // Body
-  doc.font('Helvetica').fontSize(13);
-  textChunks.forEach((chunk, chunkIndex) => {
-    doc.text(chunk, { align: 'justify' });
-    if (chunkIndex < textChunks.length - 1) {
-      doc.moveDown();
-    }
-  });
-
-  // Date
-  doc.font('Helvetica').fontSize(10)
-  doc.moveDown();
-  doc.font('Helvetica').fontSize(13);
-  doc.fillColor('#808080')
-    .text(dateString, { align: 'left' })
-    .fillColor('black');
-}
-
-const renderSingleImagePost = (doc, post) => {
-  // --- 1) Prepare Title ---
-  doc.font('Helvetica-Bold').fontSize(24);
-  const titleHeight = doc.heightOfString(post.title, {
-    width: doc.page.width - (LAYOUT.MARGINS * 2),
-  });
-
-  // --- 2) Prepare Body ---
-  doc.font('Helvetica').fontSize(13);
-  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES; // For posts w/ images
   const formattedText = convertHtmlToFormattedText(post.body);
   const textChunks = splitTextIntoChunks(formattedText, charLimit);
-
-  // Measure body text height + line spacing
   let bodyHeight = 0;
-  let bodySpacing = 0;
-  textChunks.forEach((chunk, idx) => {
-    const chunkHeight = doc.heightOfString(chunk, {
+  textChunks.forEach((chunk) => {
+    bodyHeight += doc.heightOfString(chunk, {
       width: doc.page.width - (LAYOUT.MARGINS * 2),
     });
-    bodyHeight += chunkHeight;
-    // Add spacing including after the last chunk
-    if (idx < textChunks.length) {
-      bodySpacing += doc.currentLineHeight();
+  });
+  const bodySpacing = textChunks.length > 1 ? (textChunks.length - 1) * spacingAfterTitle : 0;
+
+  // Smaller gap before date if there is body text
+  let smallerGapHeight = 0;
+  if (textChunks.length > 0) {
+    doc.font('Helvetica').fontSize(6);
+    smallerGapHeight = doc.currentLineHeight(); // Gap before date
+    doc.font('Helvetica').fontSize(13); // Reset
+  }
+
+  // Date height
+  const dateHeight = doc.heightOfString(formatDate(post.createdAt), {
+    width: doc.page.width - (LAYOUT.MARGINS * 2),
+  });
+
+  // Gap after date
+  const gapAfterDate = doc.currentLineHeight(); // Gap after date
+
+  // Total text height (excludes gapAfterDate for text-only posts)
+  const textHeight = titleHeight + spacingAfterTitle + bodyHeight + bodySpacing + smallerGapHeight + dateHeight;
+
+  return {
+    textHeight,
+    gapAfterDate,
+    textChunks,
+  };
+};
+
+const renderTextElements = (doc, post, textChunks) => {
+  // Title
+  doc.font('Helvetica-Bold').fontSize(24).text(post.title, { align: 'left' });
+
+  // Switch to body font before moving down
+  if (textChunks.length > 0) {
+    doc.font('Helvetica').fontSize(13);
+    doc.moveDown(); // Gap after title uses font size 13 line height
+  }
+
+  // Body
+  textChunks.forEach((chunk, idx) => {
+    doc.text(chunk, { align: 'justify' });
+    if (idx < textChunks.length - 1) {
+      doc.moveDown(); // Gap between chunks uses font size 13 line height
     }
   });
 
-  // --- 3) Prepare Image Dimensions ---
-  const imagePath = post.pictures[0]; // single image
-  const maxWidth = 531; // your stated limit
+  // Date with smaller gap, only if there is body text
+  
+    doc.font('Helvetica').fontSize(6);
+    doc.moveDown(); // Smaller gap before date uses font size 6 line height
 
+  doc.font('Helvetica').fontSize(13);
+  doc.fillColor('#808080').text(formatDate(post.createdAt), { align: 'left' }).fillColor('black');
+  doc.moveDown(); // Gap after date uses font size 13 line height
+};
+
+const renderTextOnlyPost = (doc, post) => {
+  const charLimit = LAYOUT.CHAR_LIMIT_NO_IMAGES; // e.g., 2500
+  const { textHeight, textChunks } = calculateTextHeights(doc, post, charLimit);
+
+  // Center vertically
+  const startY = Math.max((doc.page.height - textHeight) / 2, LAYOUT.MARGINS);
+  doc.y = startY;
+
+  renderTextElements(doc, post, textChunks);
+};
+
+const renderSingleImagePost = (doc, post) => {
+  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES; // e.g., 1000
+  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+
+  // Image scaling (initially to maxWidth)
+  const imagePath = post.pictures[0];
   let imageScaledWidth = 0;
   let imageScaledHeight = 0;
-
   if (fs.existsSync(imagePath)) {
-    // 3a) Get real dimensions
     const { width: originalW, height: originalH } = sizeOf(imagePath);
+    const maxWidth = 531;
 
-    // 3b) First, scale by maxWidth if needed (maintain aspect ratio)
+    // Scale to maxWidth if necessary
     if (originalW > maxWidth) {
       const ratio = maxWidth / originalW;
       imageScaledWidth = maxWidth;
       imageScaledHeight = originalH * ratio;
     } else {
-      // If image is already smaller than maxWidth, use original size
       imageScaledWidth = originalW;
       imageScaledHeight = originalH;
     }
-  } else {
-    console.error(`Image not found: ${imagePath}`);
-    // If not found, treat it as no image
   }
 
-  // --- 4) Prepare Date ---
-  const dateString = formatDate(post.createdAt); // ex: "January 20, 2025"
-  const dateHeight = doc.heightOfString(dateString, {
-    width: doc.page.width - (LAYOUT.MARGINS * 2),
-  });
-
-  // --- 5) Calculate Content Height WITHOUT image (we'll scale image next) ---
-  // Title + spacing after title + body + body spacing + date
-  const spacingAfterTitle = doc.currentLineHeight();
-  const partialContentHeight =
-    titleHeight + spacingAfterTitle + bodyHeight + bodySpacing + 3 * dateHeight;
-
-  // --- 6) Figure Out Remaining Space for the Image ---
-  const leftoverHeight =
-    doc.page.height - (LAYOUT.MARGINS * 2) - partialContentHeight;
-
-  // If the image is taller than leftover space, scale it down
-  if (imageScaledHeight > leftoverHeight && leftoverHeight > 0) {
-    const ratio = leftoverHeight / imageScaledHeight;
-    imageScaledHeight = leftoverHeight;
-    imageScaledWidth = imageScaledWidth * ratio;
-  }
-
-  // --- 7) Now add the scaled image height to get totalContentHeight ---
-  let totalContentHeight = partialContentHeight;
-  if (imageScaledHeight > 0) {
-    totalContentHeight += imageScaledHeight;
-  }
-
-  // --- 8) Center content vertically (avoid going above top margin) ---
+  // Calculate total content height for centering (initial estimate)
+  const totalContentHeight = textHeight + gapAfterDate + imageScaledHeight;
   const startY = Math.max((doc.page.height - totalContentHeight) / 2, LAYOUT.MARGINS);
   doc.y = startY;
 
-  // --- 9) Render Title ---
-  doc.font('Helvetica-Bold').fontSize(24).text(post.title, { align: 'left' });
-  doc.font('Helvetica').fontSize(13); // spacing after title
+  // Render text
+  renderTextElements(doc, post, textChunks);
 
-  if (post.body.length !== 0) doc.moveDown();
-  // --- 10) Render Body (Chunks) ---
-  textChunks.forEach((chunk, idx) => {
-    doc.text(chunk, { align: 'justify' });
-    if (idx < textChunks.length - 1) {
-      doc.moveDown();
-    }
-  });
+  // Calculate actual remaining space after rendering text
+  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
 
-    // --- 11) Render Date ---
-  doc.font('Helvetica').fontSize(7)
-  doc.moveDown();
-  doc.font('Helvetica').fontSize(13);
-  doc.fillColor('#808080')
-    .text(dateString, { align: 'left' })
-    .fillColor('black');
-    doc.moveDown();
-
-  // --- 12) Render Image (if it exists and scaled dimension > 0) ---
-  if (imageScaledWidth > 0 && imageScaledHeight > 0) {
-    // Center image horizontally
-    const x = (doc.page.width - imageScaledWidth) / 2;
-    doc.image(imagePath, x, doc.y, {
-      width: imageScaledWidth,
-      height: imageScaledHeight,
-    });
-    // Move Y below the image
-    doc.y += imageScaledHeight;
+  // Scale image to fit within actual remaining space
+  if (imageScaledHeight > remainingSpace && remainingSpace > 0) {
+    const ratio = remainingSpace / imageScaledHeight;
+    imageScaledHeight = remainingSpace;
+    imageScaledWidth *= ratio;
+  } else if (remainingSpace <= 0) {
+    // If no space remains, don't render the image
+    imageScaledHeight = 0;
+    imageScaledWidth = 0;
   }
-}
+
+  // Render image
+  if (imageScaledWidth > 0 && imageScaledHeight > 0) {
+    const x = (doc.page.width - imageScaledWidth) / 2;
+    doc.image(imagePath, x, doc.y, { width: imageScaledWidth, height: imageScaledHeight });
+  }
+};
  
 // Main function to generate PDF
 const createStoryPDF = () => {
@@ -325,7 +274,7 @@ const createStoryPDF = () => {
 
     const hasImages = post.pictures.length > 0;
 
-    if (hasImages && post.pictures.length === 1) {
+    if (hasImages && post.pictures.length > 0) {
         renderSingleImagePost(doc, post);
     } else if (hasImages && post.pictures.length > 1) {
     // Some other function for multiple images
@@ -338,5 +287,4 @@ const createStoryPDF = () => {
   console.log(`PDF generated at: ${pdfPath}`);
 };
 
-// Run PDF generation
 createStoryPDF();

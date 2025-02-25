@@ -39,7 +39,7 @@ const oneImagePosts = [
     },
     {
         title: 'Turkish Cat',
-        body: '',
+        body: '<p>The cat in the image is a relaxed, medium-sized tabby with a mix of brown, black, and gray fur. Its distinctive stripes and slightly ruffled coat give it a rugged yet charming look. With its eyes half-closed and front paws stretched out, it appears content while basking in the warmth of the setting sun. The soft glow of the sunlight enhances its fur, making it look even cozier. Resting on a weathered wooden bench with "BELEDİYESİ" inscribed on it, the cat seems to be a local street resident, enjoying the peaceful moment. The cat in the image is a relaxed, medium-sized tabby with a mix of brown, black, and gray fur. Its distinctive stripes and slightly ruffled coat give it a rugged yet charming look. With its eyes half-closed and front paws stretched out, it appears content while basking in the warmth of the setting sun. The soft glow of the sunlight enhances its fur, making it look even cozier. Resting on a weathered wooden bench with "BELEDİYESİ" inscribed on it.</p>',
         createdAt: '2024-05-29',
         pictures: ['images/cat.jpg']
     },
@@ -51,5 +51,5 @@ const oneImagePosts = [
     },
 ]
 
-module.exports = textPosts;
+// module.exports = textPosts;
 module.exports = oneImagePosts;
