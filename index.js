@@ -1,5 +1,5 @@
 //const textPosts = require('./sample-posts');
- const oneImagePosts = require('./sample-posts');
+ const allPosts = require('./sample-posts');
 
 const PDFDocument = require('pdfkit');
 const fs = require('fs');
@@ -12,7 +12,6 @@ const LAYOUT = {
   CHAR_LIMIT_NO_IMAGES: 2500,
   CHAR_LIMIT_WITH_IMAGES: 1000,
   MAX_IMAGES_PER_PAGE: 4,
-  IMAGE_SIZE: { width: 200, height: 150 },
   MARGINS: 32
 };
 
@@ -49,66 +48,6 @@ const splitTextIntoChunks = (text, limit) => {
   });
 
   return chunks;
-};
-
-// Function to process and add post content to PDF (unused for now)
-const processPostBody = (doc, body, hasImages) => {
-  if (!body) return;
-
-  const formattedText = convertHtmlToFormattedText(body);
-  const charLimit = hasImages ? LAYOUT.CHAR_LIMIT_WITH_IMAGES : LAYOUT.CHAR_LIMIT_NO_IMAGES;
-  const textChunks = splitTextIntoChunks(formattedText, charLimit);
-
-  textChunks.forEach((chunk, index) => {
-    doc.fontSize(13).text(chunk, { align: 'justify' });
-    if (index < textChunks.length - 1) {
-      doc.moveDown();
-    }
-  });
-};
-
-// Function to add images to PDF (unused for now)
-const addImagesToPDF = (doc, images) => {
-  if (!images.length) return;
-
-  const imagesPerRow = 2;
-  const imageSpacing = 20;
-  const availableWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
-  const imageWidth = (availableWidth - (imageSpacing * (imagesPerRow - 1))) / imagesPerRow;
-  const imageHeight = (imageWidth * LAYOUT.IMAGE_SIZE.height) / LAYOUT.IMAGE_SIZE.width;
-
-  let imagesOnCurrentPage = 0;
-  let row = 0;
-
-  images.forEach((imagePath, index) => {
-    if (imagesOnCurrentPage >= LAYOUT.MAX_IMAGES_PER_PAGE) {
-      doc.addPage();
-      imagesOnCurrentPage = 0;
-      row = 0;
-    }
-
-    const col = imagesOnCurrentPage % imagesPerRow;
-    const x = doc.page.margins.left + (col * (imageWidth + imageSpacing));
-    const y = doc.y + (row === 0 ? 0 : imageSpacing);
-
-    try {
-      if (fs.existsSync(imagePath)) {
-        doc.image(imagePath, x, y, { width: imageWidth, height: imageHeight });
-      } else {
-        console.error(`Image not found: ${imagePath}`);
-      }
-    } catch (error) {
-      console.error(`Error loading image ${imagePath}:`, error);
-    }
-
-    imagesOnCurrentPage++;
-    if (imagesOnCurrentPage % imagesPerRow === 0) {
-      row++;
-      doc.moveDown(2);
-    }
-  });
-
-  doc.moveDown(2);
 };
 
 const formatDate = (date) => {
@@ -165,6 +104,72 @@ const calculateTextHeights = (doc, post, charLimit) => {
     textHeight,
     gapAfterDate,
     textChunks,
+  };
+};
+
+const calculateDynamicLayout = (doc, post, charLimit) => {
+  // Calculate text heights
+  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+  
+  // Get image dimensions and calculate layout parameters based on number of images
+  let totalImageHeight = 0;
+  let imageGap = 8;
+  const maxImageWidth = 531;
+  const imageCount = post.pictures.length;
+  
+  if (imageCount > 0) {
+    // Estimate the image heights based on layout patterns
+    if (imageCount === 1) {
+      // For single image: estimate max height as 60% of page height
+      const maxSingleImageHeight = (doc.page.height - textHeight - gapAfterDate) * 0.6;
+      
+      // Get actual image dimensions to calculate proper aspect ratio
+      let aspectRatio = 4/3; // Default aspect ratio if image not found
+      const imagePath = post.pictures[0];
+      if (fs.existsSync(imagePath)) {
+        const { width, height } = sizeOf(imagePath);
+        aspectRatio = width / height;
+      }
+      
+      // Calculate the image height based on max width and aspect ratio
+      const widthBasedHeight = maxImageWidth / aspectRatio;
+      totalImageHeight = Math.min(widthBasedHeight, maxSingleImageHeight);
+    } 
+    else if (imageCount === 2) {
+      // For two images stacked: two equal-sized images plus gap
+      // Estimate max height as 50% of available space
+      const availableSpace = doc.page.height - textHeight - gapAfterDate - (LAYOUT.MARGINS * 2);
+      const maxImageHeight = availableSpace * 0.5;
+      totalImageHeight = (maxImageHeight * 2) + imageGap;
+    }
+    else if (imageCount === 3) {
+      // For three images: one large on top (60%), two smaller below (40%)
+      // Estimate as 50% of available space
+      const availableSpace = doc.page.height - textHeight - gapAfterDate - (LAYOUT.MARGINS * 2);
+      const maxImageHeight = availableSpace * 0.5;
+      totalImageHeight = maxImageHeight + imageGap;
+    }
+    else if (imageCount >= 4) {
+      // For four images in 2x2 grid: estimate as 40% of available space
+      const availableSpace = doc.page.height - textHeight - gapAfterDate - (LAYOUT.MARGINS * 2);
+      const maxImageHeight = availableSpace * 0.4;
+      totalImageHeight = (maxImageHeight * 2) + imageGap;
+    }
+  }
+  
+  // Calculate total content height (text + gap + images)
+  const totalContentHeight = textHeight + gapAfterDate + totalImageHeight;
+  
+  // Calculate starting Y position to center content
+  const startY = Math.max((doc.page.height - totalContentHeight) / 2, LAYOUT.MARGINS);
+  
+  return {
+    startY,
+    textHeight,
+    gapAfterDate,
+    textChunks,
+    totalImageHeight,
+    totalContentHeight
   };
 };
 
@@ -246,97 +251,114 @@ const renderTextOnlyPost = (doc, post) => {
 };
 
 const renderSingleImagePost = (doc, post) => {
-  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES; // e.g., 1000
-  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
+  
+  // 1) Render text content at the top (title, body, date)
+  const formattedText = convertHtmlToFormattedText(post.body);
+  const textChunks = splitTextIntoChunks(formattedText, charLimit);
 
-  // Image scaling (initially to maxWidth)
-  const imagePath = post.pictures[0];
-  let imageScaledWidth = 0;
-  let imageScaledHeight = 0;
-  if (fs.existsSync(imagePath)) {
-    const { width: originalW, height: originalH } = sizeOf(imagePath);
-    const maxWidth = 531;
+  doc.font('Helvetica-Bold')
+     .fontSize(24)
+     .text(post.title, { align: 'left' });
 
-    // Scale to maxWidth if necessary
-    if (originalW > maxWidth) {
-      const ratio = maxWidth / originalW;
-      imageScaledWidth = maxWidth;
-      imageScaledHeight = originalH * ratio;
-    } else {
-      imageScaledWidth = originalW;
-      imageScaledHeight = originalH;
+  if (textChunks.length > 0) {
+    doc.font('Helvetica').fontSize(13);
+    doc.moveDown();
+  }
+
+  textChunks.forEach((chunk, i) => {
+    doc.text(chunk, { align: 'justify' });
+    if (i < textChunks.length - 1) {
+      doc.moveDown();
     }
+  });
+
+  doc.font('Helvetica')
+     .fontSize(6);
+  doc.moveDown(); // Gap before date
+  doc.font('Helvetica')
+     .fontSize(13)
+     .fillColor('#808080')
+     .text(formatDate(post.createdAt), { align: 'left' })
+     .fillColor('black');
+  doc.moveDown();
+
+  // 2) Calculate leftover space after text
+  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  if (leftoverSpace <= 0) {
+    console.log("No space left for image");
+    return;
   }
 
-  // Calculate total content height for centering (initial estimate)
-  const totalContentHeight = textHeight + gapAfterDate + imageScaledHeight;
-  const startY = Math.max((doc.page.height - totalContentHeight) / 2, LAYOUT.MARGINS);
-  doc.y = startY;
+  // 3) Prepare to render the image in the leftover space, preserving aspect ratio
+  const imagePath = post.pictures[0];
+  if (!fs.existsSync(imagePath)) {
+    console.error(`Image not found: ${imagePath}`);
+    return;
+  }
+  
+  const { width: origW, height: origH } = sizeOf(imagePath);
+  const aspectRatio = origW / origH;
 
-  // Render text
-  renderTextElements(doc, post, textChunks);
+  // Assume image will fill the leftover space vertically
+  let imageHeight = leftoverSpace;
+  let imageWidth = imageHeight * aspectRatio;
 
-  // Calculate actual remaining space after rendering text
-  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
-
-  // Scale image to fit within actual remaining space
-  if (imageScaledHeight > remainingSpace && remainingSpace > 0) {
-    const ratio = remainingSpace / imageScaledHeight;
-    imageScaledHeight = remainingSpace;
-    imageScaledWidth *= ratio;
-  } else if (remainingSpace <= 0) {
-    // If no space remains, don't render the image
-    imageScaledHeight = 0;
-    imageScaledWidth = 0;
+  const maxWidth = doc.page.width - doc.page.margins.left - doc.page.margins.right;
+  if (imageWidth > maxWidth) {
+    // Clamp to maxWidth and recalc height
+    imageWidth = maxWidth;
+    imageHeight = imageWidth / aspectRatio;
   }
 
-  // Render image
-  if (imageScaledWidth > 0 && imageScaledHeight > 0) {
-    const x = (doc.page.width - imageScaledWidth) / 2;
-    doc.image(imagePath, x, doc.y, { width: imageScaledWidth, height: imageScaledHeight });
+  // 4) If the image height is less than leftover space, center it vertically
+  let verticalOffset = 0;
+  if (imageHeight < leftoverSpace) {
+    verticalOffset = (leftoverSpace - imageHeight) / 2;
   }
+  
+  // 5) Center the image horizontally
+  const imageX = (doc.page.width - imageWidth) / 2;
+
+  // Render the image with the calculated offsets
+  doc.image(imagePath, imageX, doc.y + verticalOffset, { width: imageWidth, height: imageHeight });
 };
 
 const renderTwoImagePost = (doc, post) => {
   const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
-  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
   
-  // Image paths
-  const imagePaths = post.pictures.slice(0, 2);
+  // FIX: Render text content from the top margin, instead of using calculateDynamicLayout
+  const formattedText = convertHtmlToFormattedText(post.body);
+  const textChunks = splitTextIntoChunks(formattedText, charLimit);
   
-  // Gap between images
-  const imageGap = 8;
-  
-  // Max width for images
-  const maxImageWidth = 531;
-  
-  // First, render the text to calculate remaining space
-  // Using your optimized value for better space distribution
-  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 700) / 2, LAYOUT.MARGINS);
-  doc.y = startY;
-  
+  doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
   
-  // Calculate remaining space for images
-  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
-  
-  if (remainingSpace <= 0) {
+  // Calculate leftover space for images after text is rendered
+  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  if (leftoverSpace <= 0) {
     console.log("No space left for images");
     return;
   }
   
-  // Two equal-sized images stacked vertically
-  // Divide the remaining space equally between them (minus the gap)
-  const imageHeight = (remainingSpace - imageGap) / 2;
+  const imageGap = 8;
+  // Use available width, up to a maximum of 531
+  const maxImageWidth = Math.min(531, doc.page.width - (LAYOUT.MARGINS * 2));
+  
+  // Divide the leftover space equally for two images (accounting for the gap)
+  const imageHeight = (leftoverSpace - imageGap) / 2;
   const imageWidth = maxImageWidth;
   
-  // Render first image centered
+  // Center the images horizontally
   const imageX = (doc.page.width - imageWidth) / 2;
+  const imagePaths = post.pictures.slice(0, 2);
+  
+  // Render first image centered
   if (imagePaths[0]) {
     renderCroppedImage(doc, imagePaths[0], imageX, doc.y, imageWidth, imageHeight);
   }
   
-  // Move down for second image
+  // Move down for second image (accounting for the gap)
   doc.y += imageHeight + imageGap;
   
   // Render second image centered
@@ -347,129 +369,121 @@ const renderTwoImagePost = (doc, post) => {
 
 const renderThreeImagePost = (doc, post) => {
   const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
-  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
   
-  // Image paths
-  const imagePaths = post.pictures.slice(0, 3);
+  // Render text content at the top
+  const formattedText = convertHtmlToFormattedText(post.body);
+  const textChunks = splitTextIntoChunks(formattedText, charLimit);
   
-  // Gap between images
-  const imageGap = 8;
-  
-  // Max width for images
-  const maxImageWidth = 531;
-  
-  // First, render the text to calculate remaining space
-  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 700) / 2, LAYOUT.MARGINS);
-  doc.y = startY;
-  
+  // Set starting position to the top margin
+  doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
   
-  // Calculate remaining space for images
-  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
-  
-  if (remainingSpace <= 0) {
+  // Calculate leftover space for images after text is rendered
+  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  if (leftoverSpace <= 0) {
     console.log("No space left for images");
     return;
   }
   
-  // Layout: 1 large image on top, 2 equal-sized images below
-  // Allocate 60% of space to top image, 40% to bottom row (minus the gap)
-  const topImageHeight = (remainingSpace - imageGap) * 0.6;
-  const bottomImageHeight = (remainingSpace - imageGap) * 0.4;
+  // Define gap between images
+  const imageGap = 8;
   
-  // Top image takes full width
+  // Allocate 60% of leftover space (minus gap) to the top image,
+  // and 40% to the bottom row of two images
+  const topImageHeight = (leftoverSpace - imageGap) * 0.6;
+  const bottomImageHeight = (leftoverSpace - imageGap) * 0.4;
+  
+  // Determine maximum available width for images
+  const maxImageWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
+  
+  // Top image takes full available width
   const topImageWidth = maxImageWidth;
-  // Bottom images each take (fullWidth - gap) / 2
+  // Each bottom image gets half of the available width (minus the gap)
   const bottomImageWidth = (maxImageWidth - imageGap) / 2;
   
-  // Render top image centered
+  // Center the top image horizontally
   const topImageX = (doc.page.width - topImageWidth) / 2;
+  const topImageY = doc.y; // Position immediately after text
+  
+  // Image paths for first three images
+  const imagePaths = post.pictures.slice(0, 3);
+  
+  // Render top image in its allocated area
   if (imagePaths[0]) {
-    renderCroppedImage(doc, imagePaths[0], topImageX, doc.y, topImageWidth, topImageHeight);
+    renderCroppedImage(doc, imagePaths[0], topImageX, topImageY, topImageWidth, topImageHeight);
   }
   
-  // Move down for bottom row
-  doc.y += topImageHeight + imageGap;
+  // Position bottom row: move down after top image and gap
+  const bottomRowY = topImageY + topImageHeight + imageGap;
+  
+  // Compute horizontal starting point for bottom images to center them together
+  const combinedBottomWidth = bottomImageWidth * 2 + imageGap;
+  const bottomLeftX = (doc.page.width - combinedBottomWidth) / 2;
   
   // Render bottom left image
-  const bottomLeftX = (doc.page.width - maxImageWidth) / 2;
   if (imagePaths[1]) {
-    renderCroppedImage(doc, imagePaths[1], bottomLeftX, doc.y, bottomImageWidth, bottomImageHeight);
+    renderCroppedImage(doc, imagePaths[1], bottomLeftX, bottomRowY, bottomImageWidth, bottomImageHeight);
   }
   
   // Render bottom right image
   const bottomRightX = bottomLeftX + bottomImageWidth + imageGap;
   if (imagePaths[2]) {
-    renderCroppedImage(doc, imagePaths[2], bottomRightX, doc.y, bottomImageWidth, bottomImageHeight);
+    renderCroppedImage(doc, imagePaths[2], bottomRightX, bottomRowY, bottomImageWidth, bottomImageHeight);
   }
 };
 
 const renderFourImagePost = (doc, post) => {
   const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
-  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
   
-  // Image paths
-  const imagePaths = post.pictures.slice(0, 4);
+  // Render text content at the top
+  const formattedText = convertHtmlToFormattedText(post.body);
+  const textChunks = splitTextIntoChunks(formattedText, charLimit);
   
-  // Gap between images
-  const imageGap = 8;
-  
-  // Max width for the entire grid
-  const maxGridWidth = 531;
-  
-  // First, render the text to calculate remaining space
-  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 600) / 2, LAYOUT.MARGINS);
-  doc.y = startY;
-  
+  // Set starting position to the top margin and render text
+  doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
   
-  // Calculate remaining space for images
-  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
-  
-  if (remainingSpace <= 0) {
+  // Calculate remaining space for images after text is rendered
+  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  if (leftoverSpace <= 0) {
     console.log("No space left for images");
     return;
   }
   
-  // Calculate dimensions for a 2x2 grid of equal squares
-  // The grid's height should not exceed the remaining space
-  // The grid's width should not exceed maxGridWidth
+  // FIX: Use a maximum grid width based on LAYOUT or available page width
+  const maxGridWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
   
-  // Calculate the maximum possible square size based on constraints
-  // For a 2x2 grid with gaps, we need space for 2 rows and 1 horizontal gap vertically
-  // and 2 columns and 1 vertical gap horizontally
-  const maxSquareHeight = (remainingSpace - imageGap) / 2;
-  const maxSquareWidth = (maxGridWidth - imageGap) / 2;
-  
-  // Use the smaller dimension to ensure squares
-  const squareSize = Math.min(maxSquareHeight, maxSquareWidth);
-  
-  // Calculate the total grid width and height
-  const gridWidth = squareSize * 2 + imageGap;
+  // FIX: Calculate cell dimensions for a 2x2 grid filling the leftover space
+  const imageGap = 8;
+  const cellWidth = (maxGridWidth - imageGap) / 2;
+  const cellHeight = (leftoverSpace - imageGap) / 2;
   
   // Center the grid horizontally
-  const gridX = (doc.page.width - gridWidth) / 2;
+  const gridX = (doc.page.width - maxGridWidth) / 2;
   const gridY = doc.y;
   
-  // Render the 2x2 grid
-  // Top left
+  // Image paths for the first four images
+  const imagePaths = post.pictures.slice(0, 4);
+  
+  // Render the 2x2 grid:
+  // Top left image
   if (imagePaths[0]) {
-    renderCroppedImage(doc, imagePaths[0], gridX, gridY, squareSize, squareSize);
+    renderCroppedImage(doc, imagePaths[0], gridX, gridY, cellWidth, cellHeight);
   }
   
-  // Top right
+  // Top right image
   if (imagePaths[1]) {
-    renderCroppedImage(doc, imagePaths[1], gridX + squareSize + imageGap, gridY, squareSize, squareSize);
+    renderCroppedImage(doc, imagePaths[1], gridX + cellWidth + imageGap, gridY, cellWidth, cellHeight);
   }
   
-  // Bottom left
+  // Bottom left image
   if (imagePaths[2]) {
-    renderCroppedImage(doc, imagePaths[2], gridX, gridY + squareSize + imageGap, squareSize, squareSize);
+    renderCroppedImage(doc, imagePaths[2], gridX, gridY + cellHeight + imageGap, cellWidth, cellHeight);
   }
   
-  // Bottom right
+  // Bottom right image
   if (imagePaths[3]) {
-    renderCroppedImage(doc, imagePaths[3], gridX + squareSize + imageGap, gridY + squareSize + imageGap, squareSize, squareSize);
+    renderCroppedImage(doc, imagePaths[3], gridX + cellWidth + imageGap, gridY + cellHeight + imageGap, cellWidth, cellHeight);
   }
 };
  
@@ -483,7 +497,7 @@ const createStoryPDF = () => {
   const stream = fs.createWriteStream(pdfPath);
   doc.pipe(stream);
 
-  oneImagePosts.forEach((post, index) => {
+  allPosts.forEach((post, index) => {
     if (index > 0) doc.addPage();
 
     const hasImages = post.pictures.length > 0;
