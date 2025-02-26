@@ -403,6 +403,75 @@ const renderThreeImagePost = (doc, post) => {
     renderCroppedImage(doc, imagePaths[2], bottomRightX, doc.y, bottomImageWidth, bottomImageHeight);
   }
 };
+
+const renderFourImagePost = (doc, post) => {
+  const charLimit = LAYOUT.CHAR_LIMIT_WITH_IMAGES;
+  const { textHeight, gapAfterDate, textChunks } = calculateTextHeights(doc, post, charLimit);
+  
+  // Image paths
+  const imagePaths = post.pictures.slice(0, 4);
+  
+  // Gap between images
+  const imageGap = 8;
+  
+  // Max width for the entire grid
+  const maxGridWidth = 531;
+  
+  // First, render the text to calculate remaining space
+  const startY = Math.max((doc.page.height - textHeight - gapAfterDate - 600) / 2, LAYOUT.MARGINS);
+  doc.y = startY;
+  
+  renderTextElements(doc, post, textChunks);
+  
+  // Calculate remaining space for images
+  const remainingSpace = doc.page.height - LAYOUT.MARGINS - doc.y;
+  
+  if (remainingSpace <= 0) {
+    console.log("No space left for images");
+    return;
+  }
+  
+  // Calculate dimensions for a 2x2 grid of equal squares
+  // The grid's height should not exceed the remaining space
+  // The grid's width should not exceed maxGridWidth
+  
+  // Calculate the maximum possible square size based on constraints
+  // For a 2x2 grid with gaps, we need space for 2 rows and 1 horizontal gap vertically
+  // and 2 columns and 1 vertical gap horizontally
+  const maxSquareHeight = (remainingSpace - imageGap) / 2;
+  const maxSquareWidth = (maxGridWidth - imageGap) / 2;
+  
+  // Use the smaller dimension to ensure squares
+  const squareSize = Math.min(maxSquareHeight, maxSquareWidth);
+  
+  // Calculate the total grid width and height
+  const gridWidth = squareSize * 2 + imageGap;
+  
+  // Center the grid horizontally
+  const gridX = (doc.page.width - gridWidth) / 2;
+  const gridY = doc.y;
+  
+  // Render the 2x2 grid
+  // Top left
+  if (imagePaths[0]) {
+    renderCroppedImage(doc, imagePaths[0], gridX, gridY, squareSize, squareSize);
+  }
+  
+  // Top right
+  if (imagePaths[1]) {
+    renderCroppedImage(doc, imagePaths[1], gridX + squareSize + imageGap, gridY, squareSize, squareSize);
+  }
+  
+  // Bottom left
+  if (imagePaths[2]) {
+    renderCroppedImage(doc, imagePaths[2], gridX, gridY + squareSize + imageGap, squareSize, squareSize);
+  }
+  
+  // Bottom right
+  if (imagePaths[3]) {
+    renderCroppedImage(doc, imagePaths[3], gridX + squareSize + imageGap, gridY + squareSize + imageGap, squareSize, squareSize);
+  }
+};
  
 // Main function to generate PDF
 const createStoryPDF = () => {
@@ -427,8 +496,7 @@ const createStoryPDF = () => {
       } else if (post.pictures.length === 3) {
         renderThreeImagePost(doc, post);
       } else if (post.pictures.length >= 4) {
-        // renderFourImagePost(doc, post);
-        console.log(`Post with ${post.pictures.length} images not fully supported yet`);
+        renderFourImagePost(doc, post);
       }
     } else {
       renderTextOnlyPost(doc, post);
