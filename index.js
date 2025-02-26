@@ -186,11 +186,37 @@ const renderTextOnlyPost = (doc, post) => {
   const charLimit = LAYOUT.CHAR_LIMIT_NO_IMAGES;
   const { textHeight, textChunks } = calculateTextHeights(doc, post, charLimit);
 
-  // center vertically
-  const startY = Math.max((doc.page.height - textHeight) / 2, LAYOUT.MARGINS);
+  // Determine bottom margin based on QR code presence
+  const bottomMargin = post.qrCode ? 100 : LAYOUT.MARGINS;
+
+  // Calculate available height for text
+  const availableHeight = doc.page.height - LAYOUT.MARGINS - bottomMargin;
+
+  // Center text vertically within available height
+  const centeredStartY = LAYOUT.MARGINS + (availableHeight - textHeight) / 2;
+  const startY = Math.max(centeredStartY, LAYOUT.MARGINS);
   doc.y = startY;
 
+  // Render the text
   renderTextElements(doc, post, textChunks);
+
+  // Render QR code and label if present
+  if (post.qrCode) {
+    const qrSize = 90;
+    const qrX = doc.page.width - 5 - qrSize;
+    const qrY = doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2;
+
+    // Render label
+    const labelText = 'See more digital content here =>';
+    doc.fontSize(13);
+    const labelWidth = doc.widthOfString(labelText);
+    const labelX = qrX - labelWidth - 5;
+    const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2;
+    doc.text(labelText, labelX, labelY, { align: 'left' });
+
+    // Render QR code
+    doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
+  }
 };
 
 const renderSingleImagePost = (doc, post) => {
@@ -212,41 +238,63 @@ const renderSingleImagePost = (doc, post) => {
 
   const isWide = origW >= origH;
 
-  // wide image case: centered with text content
+  // Set bottom margin: 100 if QR code exists, otherwise use default
+  const bottomMargin = post.qrCode ? 100 : LAYOUT.MARGINS;
+
+  // Wide image case: centered with text content
   if (isWide) {
     const maxWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
     const scaledWidth = maxWidth;
     const scaledHeight = scaledWidth / aspectRatio;
 
     const totalContentHeight = textHeight + gapAfterDate + scaledHeight;
-    const availableHeight = doc.page.height - LAYOUT.MARGINS * 2;
+    const availableHeight = doc.page.height - LAYOUT.MARGINS - bottomMargin;
 
     if (totalContentHeight < availableHeight) {
       const startY = (doc.page.height - totalContentHeight) / 2;
 
-      // render text
+      // Render text
       doc.y = startY;
       renderTextElements(doc, post, textChunks);
 
-      // gap after date
+      // Gap after date
       doc.y += gapAfterDate;
 
-      // render image, centered horizontally
+      // Render image, centered horizontally
       const imageX = (doc.page.width - scaledWidth) / 2;
       doc.image(imagePath, imageX, doc.y, {
         width: scaledWidth,
         height: scaledHeight,
       });
+
+      // Render QR code and label if present
+      if (post.qrCode) {
+        const qrSize = 90;
+        const qrX = doc.page.width - 5 - qrSize;
+        const qrY =
+          doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2;
+
+        // Render label
+        const labelText = 'See more digital content here =>';
+        doc.fontSize(13);
+        const labelWidth = doc.widthOfString(labelText);
+        const labelX = qrX - labelWidth - 5;
+        const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2;
+        doc.text(labelText, labelX, labelY, { align: 'left' });
+
+        // Render QR code
+        doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
+      }
       return;
     }
   }
 
-  // default case: tall image, whole height of doc
+  // Default case: tall image, whole height of doc
   doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
 
-  // calculate leftover space
-  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  // Calculate leftover space with dynamic bottom margin
+  const leftoverSpace = doc.page.height - doc.y - bottomMargin;
   if (leftoverSpace <= 0) {
     console.log('No space left for image');
     return;
@@ -262,19 +310,37 @@ const renderSingleImagePost = (doc, post) => {
     imageHeight = imageWidth / aspectRatio;
   }
 
-  // center vertically
+  // Center vertically
   let verticalOffset = 0;
   if (imageHeight < leftoverSpace) {
     verticalOffset = (leftoverSpace - imageHeight) / 2;
   }
 
-  // center horizontally
+  // Center horizontally
   const imageX = (doc.page.width - imageWidth) / 2;
 
   doc.image(imagePath, imageX, doc.y + verticalOffset, {
     width: imageWidth,
     height: imageHeight,
   });
+
+  // Render QR code and label if present
+  if (post.qrCode) {
+    const qrSize = 90;
+    const qrX = doc.page.width - 5 - qrSize;
+    const qrY = doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2;
+
+    // Render label
+    const labelText = 'See more digital content here =>';
+    doc.fontSize(13);
+    const labelWidth = doc.widthOfString(labelText);
+    const labelX = qrX - labelWidth - 5;
+    const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2;
+    doc.text(labelText, labelX, labelY, { align: 'left' });
+
+    // Render QR code
+    doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
+  }
 };
 
 const renderTwoImagePost = (doc, post) => {
@@ -286,8 +352,11 @@ const renderTwoImagePost = (doc, post) => {
   doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
 
-  // calculate leftover space
-  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  // Set bottom margin: 100 if QR code exists, otherwise use default
+  const bottomMargin = post.qrCode ? 100 : LAYOUT.MARGINS;
+
+  // Calculate leftover space with dynamic bottom margin
+  const leftoverSpace = doc.page.height - doc.y - bottomMargin;
   if (leftoverSpace <= 0) {
     console.log('No space left for images');
     return;
@@ -296,15 +365,15 @@ const renderTwoImagePost = (doc, post) => {
   const imageGap = LAYOUT.IMAGE_GAP;
   const maxImageWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
 
-  // divide equally for two images
+  // Divide equally for two images
   const imageHeight = (leftoverSpace - imageGap) / 2;
   const imageWidth = maxImageWidth;
 
-  // center horizontally
+  // Center horizontally
   const imageX = (doc.page.width - imageWidth) / 2;
   const imagePaths = post.pictures.slice(0, 2);
 
-  // first image
+  // First image
   if (imagePaths[0]) {
     renderCroppedImage(
       doc,
@@ -318,7 +387,7 @@ const renderTwoImagePost = (doc, post) => {
 
   doc.y += imageHeight + imageGap;
 
-  // second image
+  // Second image
   if (imagePaths[1]) {
     renderCroppedImage(
       doc,
@@ -329,6 +398,24 @@ const renderTwoImagePost = (doc, post) => {
       imageHeight,
     );
   }
+
+  // Render QR code and label if present
+  if (post.qrCode) {
+    const qrSize = 90;
+    const qrX = doc.page.width - 5 - qrSize;
+    const qrY = doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2;
+
+    // Render label
+    const labelText = 'See more digital content here =>';
+    doc.fontSize(13);
+    const labelWidth = doc.widthOfString(labelText);
+    const labelX = qrX - labelWidth - 5; // 5-unit gap between label and QR code
+    const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2;
+    doc.text(labelText, labelX, labelY, { align: 'left' });
+
+    // Render QR code
+    doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
+  }
 };
 
 const renderThreeImagePost = (doc, post) => {
@@ -337,11 +424,15 @@ const renderThreeImagePost = (doc, post) => {
   const formattedText = convertHtmlToFormattedText(post.body);
   const textChunks = splitTextIntoChunks(formattedText, charLimit);
 
+  // Set initial y-position
   doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
 
-  // calculate leftover space
-  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  // Determine bottom margin based on QR code presence
+  const bottomMargin = post.qrCode ? 100 : LAYOUT.MARGINS;
+
+  // Calculate remaining space for images
+  const leftoverSpace = doc.page.height - doc.y - bottomMargin;
   if (leftoverSpace <= 0) {
     console.log('No space left for images');
     return;
@@ -349,24 +440,24 @@ const renderThreeImagePost = (doc, post) => {
 
   const imageGap = LAYOUT.IMAGE_GAP;
 
-  // 60% to the top image, 40% to each bottom image
+  // 60% to the top image, 40% to the bottom row
   const topImageHeight = (leftoverSpace - imageGap) * 0.6;
   const bottomImageHeight = (leftoverSpace - imageGap) * 0.4;
 
   const maxImageWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
 
-  // full width for top image
+  // Full width for top image
   const topImageWidth = maxImageWidth;
-  // half width for bottom images
+  // Half width for bottom images
   const bottomImageWidth = (maxImageWidth - imageGap) / 2;
 
-  // center horizontally
+  // Center top image horizontally
   const topImageX = (doc.page.width - topImageWidth) / 2;
   const topImageY = doc.y;
 
   const imagePaths = post.pictures.slice(0, 3);
 
-  // first image on top
+  // Render top image
   if (imagePaths[0]) {
     renderCroppedImage(
       doc,
@@ -378,12 +469,14 @@ const renderThreeImagePost = (doc, post) => {
     );
   }
 
+  // Calculate bottom row position
   const bottomRowY = topImageY + topImageHeight + imageGap;
 
+  // Center bottom row horizontally
   const combinedBottomWidth = bottomImageWidth * 2 + imageGap;
   const bottomLeftX = (doc.page.width - combinedBottomWidth) / 2;
 
-  // bottom left image
+  // Render bottom left image
   if (imagePaths[1]) {
     renderCroppedImage(
       doc,
@@ -395,7 +488,7 @@ const renderThreeImagePost = (doc, post) => {
     );
   }
 
-  // bottom right image
+  // Render bottom right image
   const bottomRightX = bottomLeftX + bottomImageWidth + imageGap;
   if (imagePaths[2]) {
     renderCroppedImage(
@@ -407,6 +500,24 @@ const renderThreeImagePost = (doc, post) => {
       bottomImageHeight,
     );
   }
+
+  // Add QR code and label if present
+  if (post.qrCode) {
+    const qrSize = 90;
+    const qrX = doc.page.width - 5 - qrSize;
+    const qrY = doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2; // Center vertically in the 100px space
+
+    // Render label
+    const labelText = 'See more digital content here =>';
+    doc.fontSize(13);
+    const labelWidth = doc.widthOfString(labelText);
+    const labelX = qrX - labelWidth - 5; // 5px gap between label and QR code
+    const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2; // Vertically align with QR code
+    doc.text(labelText, labelX, labelY, { align: 'left' });
+
+    // Render QR code
+    doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
+  }
 };
 
 const renderFourImagePost = (doc, post) => {
@@ -415,11 +526,15 @@ const renderFourImagePost = (doc, post) => {
   const formattedText = convertHtmlToFormattedText(post.body);
   const textChunks = splitTextIntoChunks(formattedText, charLimit);
 
+  // Set initial y-position
   doc.y = LAYOUT.MARGINS;
   renderTextElements(doc, post, textChunks);
 
-  // calculate remaining space
-  const leftoverSpace = doc.page.height - doc.y - LAYOUT.MARGINS;
+  // Determine bottom margin based on QR code presence
+  const bottomMargin = post.qrCode ? 100 : LAYOUT.MARGINS;
+
+  // Calculate remaining space for images
+  const leftoverSpace = doc.page.height - doc.y - bottomMargin;
   if (leftoverSpace <= 0) {
     console.log('No space left for images');
     return;
@@ -427,23 +542,23 @@ const renderFourImagePost = (doc, post) => {
 
   const maxGridWidth = Math.min(531, doc.page.width - LAYOUT.MARGINS * 2);
 
-  // calculate cell dimensions
+  // Calculate cell dimensions for images
   const imageGap = LAYOUT.IMAGE_GAP;
   const cellWidth = (maxGridWidth - imageGap) / 2;
   const cellHeight = (leftoverSpace - imageGap) / 2;
 
-  // center horizontally
+  // Center the image grid horizontally
   const gridX = (doc.page.width - maxGridWidth) / 2;
   const gridY = doc.y;
 
   const imagePaths = post.pictures.slice(0, 4);
 
-  // top left image
+  // Render top left image
   if (imagePaths[0]) {
     renderCroppedImage(doc, imagePaths[0], gridX, gridY, cellWidth, cellHeight);
   }
 
-  // top right image
+  // Render top right image
   if (imagePaths[1]) {
     renderCroppedImage(
       doc,
@@ -455,7 +570,7 @@ const renderFourImagePost = (doc, post) => {
     );
   }
 
-  // bottom left image
+  // Render bottom left image
   if (imagePaths[2]) {
     renderCroppedImage(
       doc,
@@ -467,7 +582,7 @@ const renderFourImagePost = (doc, post) => {
     );
   }
 
-  // bottom right image
+  // Render bottom right image
   if (imagePaths[3]) {
     renderCroppedImage(
       doc,
@@ -477,6 +592,24 @@ const renderFourImagePost = (doc, post) => {
       cellWidth,
       cellHeight,
     );
+  }
+
+  // Add QR code and label if present
+  if (post.qrCode) {
+    const qrSize = 90;
+    const qrX = doc.page.width - 5 - qrSize;
+    const qrY = doc.page.height - bottomMargin + (bottomMargin - qrSize) / 2; // Center vertically in the 100px space
+
+    // Render label
+    const labelText = 'See more digital content here =>';
+    doc.fontSize(13);
+    const labelWidth = doc.widthOfString(labelText);
+    const labelX = qrX - labelWidth - 5;
+    const labelY = qrY + (qrSize - doc.currentLineHeight()) / 2; // Vertically align with QR code
+    doc.text(labelText, labelX, labelY, { align: 'left' });
+
+    // Render QR code
+    doc.image(post.qrCode, qrX, qrY, { width: qrSize, height: qrSize });
   }
 };
 
